@@ -1,0 +1,56 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  passwordHash String
+  name         String
+  role         String        // "CITIZEN", "INVESTOR", "ADMIN"
+  isVerified   Boolean       @default(false)
+  otpCode      String?
+  otpExpiresAt DateTime?
+  createdAt    DateTime      @default(now())
+  wasteReports WasteReport[]
+}
+
+model WasteReport {
+  id           String   @id @default(uuid())
+  reporterId   String
+  reporterName String
+  type         String   // "Organic", "Plastic", "E-Waste", "Hazardous", "Metal", "Paper"
+  description  String
+  location     String
+  quantity     Float    // estimated tonnage
+  status       String   @default("not clear") // "not clear", "PENDING", "ASSIGNED", "COLLECTED", "PROCESSED"
+  fileUrl      String?  // optional upload url/path
+  createdAt    DateTime @default(now())
+  user         User     @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+}
+
+model ContactInquiry {
+  id           String   @id @default(uuid())
+  name         String
+  email        String
+  organization String?
+  message      String
+  createdAt    DateTime @default(now())
+}
+
+model TelemetryLog {
+  id        String   @id @default(uuid())
+  type      String   // "CARBON", "AIR", "ENERGY"
+  metric    String   // month name, day of week, or week name
+  value     Float
+  createdAt DateTime @default(now())
+}
+
