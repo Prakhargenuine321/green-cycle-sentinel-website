@@ -1,4 +1,11 @@
+import dns from "node:dns";
 import nodemailer from "nodemailer";
+
+// Force Node.js to prefer IPv4 DNS resolution.
+// This prevents ENETUNREACH errors in environments (like Railway, AWS, Docker) where IPv6 outbound is not configured or disabled.
+if (typeof dns.setDefaultResultOrder === "function") {
+  dns.setDefaultResultOrder("ipv4first");
+}
 
 // Create reusable transporter using Gmail SMTP
 const createTransporter = () => {
