@@ -47,11 +47,18 @@ export function Hero() {
               variants={staggerChildFadeInUp}
               className="flex flex-col sm:flex-row gap-4 pt-2"
             >
-              <Link href="/report-waste">
-                <GlowButton size="lg" className="w-full sm:w-auto gap-2">
+              <div className="relative group/reportbtn w-full sm:w-auto cursor-not-allowed">
+                <GlowButton 
+                  size="lg" 
+                  disabled 
+                  className="w-full sm:w-auto gap-2 opacity-50 pointer-events-none"
+                >
                   Report Waste <ArrowRight className="h-4 w-4" />
                 </GlowButton>
-              </Link>
+                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-3 py-1.5 bg-foreground text-background rounded-lg text-[11px] font-mono font-medium whitespace-nowrap opacity-0 group-hover/reportbtn:opacity-100 transition-opacity duration-200 pointer-events-none shadow-lg z-50">
+                  ⏳ Initiating soon
+                </div>
+              </div>
               <Link href="/technology">
                 <GlowButton
                   variant="outline"
