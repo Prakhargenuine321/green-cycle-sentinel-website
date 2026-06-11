@@ -22,12 +22,74 @@ export default function RegisterPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Email and Password strength checks
+  const emailLower = formData.email.toLowerCase().trim();
+  const emailDomainValid = !formData.email || emailLower.endsWith("@gmail.com") || emailLower.endsWith("@sentinel.com") || emailLower.endsWith("@investor.com");
+
+  const password = formData.password;
+  const criteria = {
+    minChar: password.length >= 8,
+    hasUpper: /[A-Z]/.test(password),
+    hasLower: /[a-z]/.test(password),
+    hasNumber: /[0-9]/.test(password),
+    hasSpecial: /[^A-Za-z0-9]/.test(password),
+  };
+  const metCount = Object.values(criteria).filter(Boolean).length;
+  
+  let score = 0;
+  let strengthLabel = "";
+  let barColor = "bg-transparent";
+  let textColor = "text-muted-foreground";
+
+  if (password) {
+    if (metCount <= 2) {
+      score = 1;
+      strengthLabel = "Weak";
+      barColor = "bg-red-500/80";
+      textColor = "text-red-500";
+    } else if (metCount <= 4) {
+      score = 2;
+      strengthLabel = "Moderate";
+      barColor = "bg-amber-500/80";
+      textColor = "text-amber-500";
+    } else {
+      score = 3;
+      strengthLabel = "Strong";
+      barColor = "bg-emerald-500/80";
+      textColor = "text-emerald-400";
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
+    // 1. Gmail validation check
+    const emailLower = formData.email.toLowerCase().trim();
+    const isGmail = emailLower.endsWith("@gmail.com");
+    const isSystemDomain = emailLower.endsWith("@sentinel.com") || emailLower.endsWith("@investor.com");
+    if (!isGmail && !isSystemDomain) {
+      setError("Registration is restricted to valid Gmail accounts (@gmail.com).");
+      return;
+    }
+
+    // 2. Password match check
     if (formData.password !== formData.confirmPassword) {
       setError("Passwords do not match");
+      return;
+    }
+
+    // 3. Password strength check (Must have at least 3 conditions met)
+    const metCount = [
+      formData.password.length >= 8,
+      /[A-Z]/.test(formData.password),
+      /[a-z]/.test(formData.password),
+      /[0-9]/.test(formData.password),
+      /[^A-Za-z0-9]/.test(formData.password),
+    ].filter(Boolean).length;
+
+    if (metCount <= 2) {
+      setError("Your password is too weak. Please satisfy at least 3 security guidelines.");
       return;
     }
 
@@ -100,10 +162,15 @@ export default function RegisterPage() {
               <GlowInput
                 type="email"
                 required
-                placeholder="elena@university.edu"
+                placeholder="elena@gmail.com"
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
               />
+              {!emailDomainValid && (
+                <p className="text-[10px] font-mono text-red-400 mt-1">
+                  ⚠️ Must be a valid Gmail account (@gmail.com)
+                </p>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -130,6 +197,46 @@ export default function RegisterPage() {
                 />
               </div>
             </div>
+
+            {/* Password strength indicators */}
+            {password && (
+              <div className="space-y-2 mt-2">
+                <div className="flex justify-between items-center text-[10px] font-mono">
+                  <span className="text-muted-foreground/80">Password Strength:</span>
+                  <span className={`font-bold uppercase ${textColor}`}>{strengthLabel}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-1.5 h-1 bg-border/5 rounded-full overflow-hidden">
+                  <div className={`h-full rounded-full transition-all duration-300 ${score >= 1 ? barColor : "bg-transparent"}`} />
+                  <div className={`h-full rounded-full transition-all duration-300 ${score >= 2 ? barColor : "bg-transparent"}`} />
+                  <div className={`h-full rounded-full transition-all duration-300 ${score >= 3 ? barColor : "bg-transparent"}`} />
+                </div>
+                
+                {/* Guidelines Checklist */}
+                <div className="p-3 bg-background/20 border border-border/10 rounded-lg text-[10px] font-mono space-y-1.5 mt-3">
+                  <div className="text-muted-foreground/60 uppercase tracking-wider mb-1">Security Guidelines:</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className={criteria.minChar ? "text-emerald-400" : "text-muted-foreground/45"}>
+                      {criteria.minChar ? "✓" : "○"} At least 8 characters
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className={(criteria.hasUpper && criteria.hasLower) ? "text-emerald-400" : "text-muted-foreground/45"}>
+                      {(criteria.hasUpper && criteria.hasLower) ? "✓" : "○"} Mix of Uppercase & Lowercase
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className={criteria.hasNumber ? "text-emerald-400" : "text-muted-foreground/45"}>
+                      {criteria.hasNumber ? "✓" : "○"} At least one number (0-9)
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className={criteria.hasSpecial ? "text-emerald-400" : "text-muted-foreground/45"}>
+                      {criteria.hasSpecial ? "✓" : "○"} At least one special symbol (#, $, %, etc.)
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <GlowButton type="submit" disabled={loading} className="w-full gap-2 py-2.5 mt-2">
               {loading ? "Registering..." : "Create Account"} <UserPlus className="h-4 w-4" />
