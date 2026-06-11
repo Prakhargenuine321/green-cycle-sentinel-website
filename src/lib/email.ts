@@ -1,46 +1,124 @@
-import dns from "node:dns";
-import nodemailer from "nodemailer";
+async function getGmailAccessToken(): Promise<string> {
+  const clientId = process.env.GMAIL_CLIENT_ID;
+  const clientSecret = process.env.GMAIL_CLIENT_SECRET;
+  const refreshToken = process.env.GMAIL_REFRESH_TOKEN;
 
-// Force Node.js to prefer IPv4 DNS resolution.
-// This prevents ENETUNREACH errors in environments (like Railway, AWS, Docker) where IPv6 outbound is not configured or disabled.
-if (typeof dns.setDefaultResultOrder === "function") {
-  dns.setDefaultResultOrder("ipv4first");
-}
-
-// Create reusable transporter
-const createTransporter = () => {
-  if (process.env.SMTP_HOST) {
-    return nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT || "587", 10),
-      secure: process.env.SMTP_SECURE === "true", // true for port 465, false for 587 or 2525
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-      tls: {
-        rejectUnauthorized: false,
-      },
-    });
+  if (!clientId || !clientSecret || !refreshToken) {
+    throw new Error("Missing Google OAuth2 credentials in environment variables.");
   }
 
-  // Fallback to default Gmail service
-  return nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
     },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }),
   });
-};
+
+  const data = (await response.json()) as { access_token?: string; error?: string; error_description?: string };
+  if (!response.ok || !data.access_token) {
+    throw new Error(`Failed to refresh Gmail access token: ${data.error_description || data.error || "Unknown error"}`);
+  }
+
+  return data.access_token;
+}
+
+// Core helper to send email via Gmail REST HTTP API
+async function sendEmailViaService(mailOptions: {
+  from: string;
+  to: string | string[];
+  replyTo?: string;
+  subject: string;
+  text: string;
+  html: string;
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    console.log("[EMAIL] Refreshing Gmail OAuth2 Access Token...");
+    const accessToken = await getGmailAccessToken();
+
+    console.log("[EMAIL] Attempting to send email via Gmail REST API...");
+    const toEmail = Array.isArray(mailOptions.to) ? mailOptions.to.join(", ") : mailOptions.to;
+
+    // Build standard RFC822 MIME message
+    const lines = [
+      `From: ${mailOptions.from}`,
+      `To: ${toEmail}`,
+    ];
+
+    if (mailOptions.replyTo) {
+      lines.push(`Reply-To: ${mailOptions.replyTo}`);
+    }
+
+    // MIME Base64 encoding for safe Unicode subject headers
+    const utf8Subject = `=?utf-8?B?${Buffer.from(mailOptions.subject).toString("base64")}?=`;
+    lines.push(`Subject: ${utf8Subject}`);
+    lines.push("MIME-Version: 1.0");
+
+    const boundary = `gcs_boundary_${Date.now()}`;
+    lines.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
+    lines.push(""); // End of headers
+
+    // Text part
+    lines.push(`--${boundary}`);
+    lines.push("Content-Type: text/plain; charset=utf-8");
+    lines.push("Content-Transfer-Encoding: base64");
+    lines.push("");
+    lines.push(Buffer.from(mailOptions.text).toString("base64"));
+
+    // HTML part
+    lines.push(`--${boundary}`);
+    lines.push("Content-Type: text/html; charset=utf-8");
+    lines.push("Content-Transfer-Encoding: base64");
+    lines.push("");
+    lines.push(Buffer.from(mailOptions.html).toString("base64"));
+
+    lines.push(`--${boundary}--`);
+
+    const rawMessage = lines.join("\r\n");
+    const encodedMessage = Buffer.from(rawMessage)
+      .toString("base64")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+
+    const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        raw: encodedMessage,
+      }),
+    });
+
+    const data = (await response.json()) as { id?: string; error?: { message?: string } };
+    if (!response.ok) {
+      throw new Error(data.error?.message || JSON.stringify(data));
+    }
+
+    console.log("[EMAIL] Email sent successfully via Gmail API. ID:", data.id);
+    return { success: true };
+  } catch (error) {
+    console.error("[EMAIL] Failed to send email via Gmail API:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to send email via Gmail API",
+    };
+  }
+}
+
 
 export async function sendOtpEmail(toEmail: string, otpCode: string, userName: string): Promise<{ success: boolean; error?: string }> {
   try {
-    if (!process.env.SMTP_USER || !process.env.SMTP_PASS || process.env.SMTP_USER === "your-gmail@gmail.com") {
-      throw new Error("Email SMTP credentials are not configured in .env file.");
+    if (!process.env.GMAIL_CLIENT_ID || !process.env.GMAIL_CLIENT_SECRET || !process.env.GMAIL_REFRESH_TOKEN) {
+      throw new Error("Gmail API OAuth2 credentials are not configured.");
     }
-
-    const transporter = createTransporter();
 
     const htmlBody = `
 <!DOCTYPE html>
@@ -108,15 +186,13 @@ export async function sendOtpEmail(toEmail: string, otpCode: string, userName: s
 </body>
 </html>`;
 
-    await transporter.sendMail({
-      from: process.env.EMAIL_FROM || `"Green Cycle Sentinel" <${process.env.SMTP_USER}>`,
+    return await sendEmailViaService({
+      from: process.env.EMAIL_FROM || `"Green Cycle Sentinel" <greencyclesentinel@gmail.com>`,
       to: toEmail,
       subject: `GCS Sentinel: Your verification code is ${otpCode}`,
       text: `Hello ${userName},\n\nYour GCS Sentinel email verification code is: ${otpCode}\n\nThis code expires in 10 minutes.\n\nIf you didn't register, please ignore this email.\n\n— Green Cycle Sentinel`,
       html: htmlBody,
     });
-
-    return { success: true };
   } catch (error) {
     console.error("[EMAIL] Failed to send OTP email:", error);
     return {
@@ -125,6 +201,7 @@ export async function sendOtpEmail(toEmail: string, otpCode: string, userName: s
     };
   }
 }
+
 
 export async function sendWasteReportEmail(data: {
   reporterName: string;
@@ -137,11 +214,9 @@ export async function sendWasteReportEmail(data: {
   fileUrl?: string | null;
 }): Promise<{ success: boolean; error?: string }> {
   try {
-    if (!process.env.SMTP_USER || !process.env.SMTP_PASS || process.env.SMTP_USER === "your-gmail@gmail.com") {
-      throw new Error("Email SMTP credentials are not configured in .env file.");
+    if (!process.env.GMAIL_CLIENT_ID || !process.env.GMAIL_CLIENT_SECRET || !process.env.GMAIL_REFRESH_TOKEN) {
+      throw new Error("Gmail API OAuth2 credentials are not configured.");
     }
-
-    const transporter = createTransporter();
 
     const htmlBody = `
 <!DOCTYPE html>
@@ -233,16 +308,18 @@ export async function sendWasteReportEmail(data: {
 </body>
 </html>`;
 
-    await transporter.sendMail({
-      from: `"${data.reporterName}" <${data.email}>`,
+    // Ensure the from address email matches the authenticated Gmail account for Google API
+    const systemEmail = process.env.EMAIL_FROM || "greencyclesentinel@gmail.com";
+    const fromAddress = `"${data.reporterName}" <${systemEmail}>`;
+
+    return await sendEmailViaService({
+      from: fromAddress,
       replyTo: data.email,
-      to: process.env.SMTP_USER,
+      to: process.env.ADMIN_EMAIL || systemEmail,
       subject: `[New Waste Report Alert] ${data.category.toUpperCase()} at ${data.location}`,
       text: `Hello,\n\nA new waste report has been submitted.\n\nReporter: ${data.reporterName}\nEmail: ${data.email}\nPhone: ${data.phone}\nLocation: ${data.location}\nCategory: ${data.category}\nQuantity: ${data.quantity} Tons\nDescription: ${data.description}\n\nStatus: not clear\n\n— Green Cycle Sentinel Operations`,
       html: htmlBody,
     });
-
-    return { success: true };
   } catch (error) {
     console.error("[EMAIL] Failed to send waste report email:", error);
     return {

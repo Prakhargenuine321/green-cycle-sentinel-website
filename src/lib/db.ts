@@ -1,19 +1,6 @@
 import { PrismaClient } from "@/generated/prisma/client";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
-import path from "path";
-
-// Resolve the database path to an absolute path, consistent between
-// the Prisma CLI (runs from project root) and the Next.js server.
-// DATABASE_URL in .env: "file:./dev.db" → resolves to <projectRoot>/dev.db
-const getDatabasePath = (): string => {
-  const envUrl = process.env.DATABASE_URL || "file:./dev.db";
-  // Strip the "file:" prefix to get the relative/absolute path
-  const relativePath = envUrl.startsWith("file:") ? envUrl.slice(5) : envUrl;
-  // Always resolve relative to the project root (process.cwd())
-  return path.resolve(/*turbopackIgnore: true*/ process.cwd(), relativePath);
-};
-
-const dbPath = getDatabasePath();
+import { PrismaPg } from "@prisma/adapter-pg";
+import pg from "pg";
 
 // Prevent multiple instances of PrismaClient in development (Next.js hot reload)
 const globalForPrisma = globalThis as unknown as {
@@ -21,7 +8,21 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 const createPrismaClient = () => {
-  const adapter = new PrismaBetterSqlite3({ url: dbPath });
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error(
+      "DATABASE_URL environment variable is not defined. Please add a valid PostgreSQL connection string (e.g., postgresql://...) to your .env file."
+    );
+  }
+
+  if (connectionString.startsWith("file:")) {
+    throw new Error(
+      "DATABASE_URL is configured for SQLite ('file:...'), but the project has been migrated to PostgreSQL for production. Please update DATABASE_URL in your .env file to a valid PostgreSQL connection string."
+    );
+  }
+
+  const pool = new pg.Pool({ connectionString });
+  const adapter = new PrismaPg(pool);
   return new PrismaClient({ adapter });
 };
 
