@@ -77,7 +77,11 @@ export default function OtpVerificationPage() {
       if (res.success) {
         // Clear temp verification email
         localStorage.removeItem("verification_email");
-        router.push("/login");
+        if (res.role === "INVESTOR" || res.role === "ADMIN") {
+          document.cookie = "investor_bypass=true; path=/; max-age=604800; SameSite=Lax";
+        }
+        router.push("/");
+        router.refresh();
       } else {
         setError(res.error || "Verification failed");
       }

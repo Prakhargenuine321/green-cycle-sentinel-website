@@ -156,7 +156,7 @@ export async function verifyOtpAction(email: string, code: string) {
       return { success: false, error: "Email is already registered" };
     }
 
-    await db.user.create({
+    const newUser = await db.user.create({
       data: {
         email: pendingData.email,
         passwordHash: pendingData.passwordHash,
@@ -166,10 +166,13 @@ export async function verifyOtpAction(email: string, code: string) {
       },
     });
 
+    // Write encrypted session and helper cookies
+    await createSession(newUser.id, newUser.email, newUser.name, newUser.role);
+
     // Clear the pending registration cookie
     cookieStore.delete("pending_registration");
 
-    return { success: true };
+    return { success: true, role: newUser.role };
   } catch (error) {
     console.error("OTP verification failed:", error);
     return { success: false, error: "Internal server error" };

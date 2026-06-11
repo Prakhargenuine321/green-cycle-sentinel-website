@@ -14,7 +14,7 @@ import { loginAction } from "@/app/actions";
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirect = searchParams.get("redirect") || "/report-waste";
+  const redirect = searchParams.get("redirect") || "/";
   
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
