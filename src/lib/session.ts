@@ -1,6 +1,9 @@
 import { cookies } from "next/headers";
 import crypto from "crypto";
 
+if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) {
+  throw new Error("CRITICAL SECURITY ERROR: SESSION_SECRET environment variable must be defined in production mode.");
+}
 const SECRET_KEY = process.env.SESSION_SECRET || "green-cycle-sentinel-fallback-secret-2026";
 // AES-256-GCM expects a 32-byte key. We derive one from the secret.
 const key = crypto.scryptSync(SECRET_KEY, "salt-gcs", 32);

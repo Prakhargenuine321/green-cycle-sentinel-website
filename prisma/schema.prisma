@@ -35,6 +35,9 @@ model WasteReport {
   fileUrl      String?  // optional upload url/path
   createdAt    DateTime @default(now())
   user         User     @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+
+  @@index([reporterId])
+  @@index([status])
 }
 
 model ContactInquiry {
