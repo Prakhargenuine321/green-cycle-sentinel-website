@@ -65,6 +65,7 @@ function decryptPendingData(token: string): PendingRegistrationData | null {
 // 2. User Registration
 export async function registerAction(data: { name: string; email: string; password: string }) {
   try {
+    console.log("[REGISTER_ACTION_TRIGGERED] New sign-up attempt for:", data.email);
     const existing = await db.user.findUnique({
       where: { email: data.email },
     });
