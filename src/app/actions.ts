@@ -23,6 +23,45 @@ function verifyPassword(password: string, stored: string): boolean {
   return hash === verifyHash;
 }
 
+const REGISTRATION_SECRET_KEY = process.env.SESSION_SECRET || "green-cycle-sentinel-fallback-secret-2026";
+const derivedKey = crypto.scryptSync(REGISTRATION_SECRET_KEY, "salt-gcs-reg", 32);
+
+interface PendingRegistrationData {
+  name: string;
+  email: string;
+  passwordHash: string;
+  otpCode: string;
+  otpExpiresAt: number;
+}
+
+function encryptPendingData(data: PendingRegistrationData): string {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", derivedKey, iv);
+  let encrypted = cipher.update(JSON.stringify(data), "utf8", "hex");
+  encrypted += cipher.final("hex");
+  const authTag = cipher.getAuthTag().toString("hex");
+  return `${iv.toString("hex")}.${encrypted}.${authTag}`;
+}
+
+function decryptPendingData(token: string): PendingRegistrationData | null {
+  try {
+    const [ivHex, encryptedHex, authTagHex] = token.split(".");
+    if (!ivHex || !encryptedHex || !authTagHex) return null;
+    
+    const iv = Buffer.from(ivHex, "hex");
+    const authTag = Buffer.from(authTagHex, "hex");
+    const decipher = crypto.createDecipheriv("aes-256-gcm", derivedKey, iv);
+    decipher.setAuthTag(authTag);
+    
+    let decrypted = decipher.update(encryptedHex, "hex", "utf8");
+    decrypted += decipher.final("utf8");
+    return JSON.parse(decrypted) as PendingRegistrationData;
+  } catch (error) {
+    console.error("Failed to decrypt pending registration:", error);
+    return null;
+  }
+}
+
 // 2. User Registration
 export async function registerAction(data: { name: string; email: string; password: string }) {
   try {
@@ -36,36 +75,33 @@ export async function registerAction(data: { name: string; email: string; passwo
 
     const passwordHash = hashPassword(data.password);
     
-    // Default role is "CITIZEN" unless email domain is "sentinel.com" or "investor.com"
-    let role = "CITIZEN";
-    if (data.email.endsWith("@sentinel.com")) {
-      role = "ADMIN";
-    } else if (data.email.endsWith("@investor.com")) {
-      role = "INVESTOR";
-    }
-
     // Generate random 6-digit OTP code and set 10 minute expiration
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
     const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-    await db.user.create({
-      data: {
-        email: data.email,
-        passwordHash,
-        name: data.name,
-        role,
-        otpCode,
-        otpExpiresAt,
-      },
-    });
-
     // Send OTP via email
     const emailResult = await sendOtpEmail(data.email, otpCode, data.name);
     if (!emailResult.success) {
-      console.warn(`[AUTH_FALLBACK] Failed to send OTP email to ${data.email}. OTP generated is: ${otpCode}`);
-      // Do NOT rollback/delete the user. Let them verify.
-      return { success: true };
+      return { success: false, error: "Failed to send verification email. Please try again." };
     }
+
+    // Save registration details in an encrypted cookie
+    const pendingData = {
+      name: data.name,
+      email: data.email,
+      passwordHash,
+      otpCode,
+      otpExpiresAt: otpExpiresAt.getTime(),
+    };
+
+    const cookieStore = await cookies();
+    cookieStore.set("pending_registration", encryptPendingData(pendingData), {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 10 * 60, // 10 minutes
+      sameSite: "lax",
+      path: "/",
+    });
 
     return { success: true };
   } catch (error) {
@@ -77,31 +113,60 @@ export async function registerAction(data: { name: string; email: string; passwo
 // 3. OTP Verification
 export async function verifyOtpAction(email: string, code: string) {
   try {
-    const user = await db.user.findUnique({
-      where: { email },
-    });
-
-    if (!user) {
-      return { success: false, error: "User not found" };
+    const cookieStore = await cookies();
+    const pendingCookie = cookieStore.get("pending_registration")?.value;
+    if (!pendingCookie) {
+      return { success: false, error: "Verification session expired. Please register again." };
     }
 
-    if (!user.otpCode || user.otpCode !== code) {
+    const pendingData = decryptPendingData(pendingCookie);
+    if (!pendingData) {
+      return { success: false, error: "Invalid verification session." };
+    }
+
+    // Double check that the email matches the verification session email
+    if (pendingData.email !== email) {
+      return { success: false, error: "Invalid email session" };
+    }
+
+    if (pendingData.otpCode !== code) {
       return { success: false, error: "Invalid verification code" };
     }
 
-    if (user.otpExpiresAt && new Date(user.otpExpiresAt).getTime() < Date.now()) {
-      return { success: false, error: "Verification code has expired" };
+    if (pendingData.otpExpiresAt < Date.now()) {
+      return { success: false, error: "Verification code has expired. Please register again." };
     }
 
-    // Mark account as verified and clear the OTP
-    await db.user.update({
-      where: { email },
+    // Now save the user to the database since OTP is successfully verified!
+    // Default role is "CITIZEN" unless email domain is "sentinel.com" or "investor.com"
+    let role = "CITIZEN";
+    if (pendingData.email.endsWith("@sentinel.com")) {
+      role = "ADMIN";
+    } else if (pendingData.email.endsWith("@investor.com")) {
+      role = "INVESTOR";
+    }
+
+    // Ensure user was not registered by another request in the meantime
+    const existing = await db.user.findUnique({
+      where: { email: pendingData.email },
+    });
+    if (existing) {
+      cookieStore.delete("pending_registration");
+      return { success: false, error: "Email is already registered" };
+    }
+
+    await db.user.create({
       data: {
-        isVerified: true,
-        otpCode: null,
-        otpExpiresAt: null,
+        email: pendingData.email,
+        passwordHash: pendingData.passwordHash,
+        name: pendingData.name,
+        role,
+        isVerified: true, // Mark verified!
       },
     });
+
+    // Clear the pending registration cookie
+    cookieStore.delete("pending_registration");
 
     return { success: true };
   } catch (error) {
@@ -113,32 +178,42 @@ export async function verifyOtpAction(email: string, code: string) {
 // 4. Resend OTP
 export async function resendOtpAction(email: string) {
   try {
-    const user = await db.user.findUnique({
-      where: { email },
-    });
+    const cookieStore = await cookies();
+    const pendingCookie = cookieStore.get("pending_registration")?.value;
+    if (!pendingCookie) {
+      return { success: false, error: "Registration session expired. Please register again." };
+    }
 
-    if (!user) {
-      return { success: false, error: "User not found" };
+    const pendingData = decryptPendingData(pendingCookie);
+    if (!pendingData) {
+      return { success: false, error: "Invalid verification session." };
+    }
+
+    if (pendingData.email !== email) {
+      return { success: false, error: "Invalid email session" };
     }
 
     // Generate fresh 6-digit OTP code and set 10 minute expiration
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
     const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-    await db.user.update({
-      where: { email },
-      data: {
-        otpCode,
-        otpExpiresAt,
-      },
-    });
+    pendingData.otpCode = otpCode;
+    pendingData.otpExpiresAt = otpExpiresAt.getTime();
 
     // Send fresh OTP via email
-    const emailResult = await sendOtpEmail(email, otpCode, user.name);
+    const emailResult = await sendOtpEmail(email, otpCode, pendingData.name);
     if (!emailResult.success) {
-      console.warn(`[AUTH_FALLBACK] Failed to resend OTP email to ${email}. OTP generated is: ${otpCode}`);
-      return { success: true };
+      return { success: false, error: "Failed to resend OTP email. Please try again." };
     }
+
+    // Save updated cookie
+    cookieStore.set("pending_registration", encryptPendingData(pendingData), {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 10 * 60,
+      sameSite: "lax",
+      path: "/",
+    });
 
     return { success: true };
   } catch (error) {
