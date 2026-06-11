@@ -164,6 +164,44 @@
   }
 }
 
+@keyframes particle-flow {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -32;
+  }
+}
+
+@keyframes badge-shimmer-sweep {
+  0% {
+    background-position: 150% 0;
+  }
+  100% {
+    background-position: -50% 0;
+  }
+}
+
+@keyframes meter-pulse {
+  0%, 100% {
+    opacity: 0.7;
+    box-shadow: 0 0 8px oklch(from var(--primary) l c h / 0.4);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 20px oklch(from var(--primary) l c h / 0.8);
+  }
+}
+
+@keyframes orbit-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Premium Design System Custom Utility Classes */
 @layer utilities {
   .glass-card {
@@ -219,5 +257,153 @@
   .glow-border-hover:hover {
     border-color: oklch(from var(--primary) l c h / 0.4);
     box-shadow: 0 0 20px oklch(from var(--primary) l c h / 0.2);
+  }
+
+  /* ── Simulator Utilities ── */
+  .simulator-flow-path {
+    stroke-dasharray: 6 10;
+    animation: particle-flow 1.2s linear infinite;
+    will-change: stroke-dashoffset;
+  }
+
+  .simulator-flow-path-slow {
+    stroke-dasharray: 8 14;
+    animation: particle-flow 2s linear infinite;
+    will-change: stroke-dashoffset;
+  }
+
+  .badge-shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .badge-shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      105deg,
+      transparent 35%,
+      oklch(1 0 0 / 0.18) 50%,
+      transparent 65%
+    );
+    background-size: 200% 100%;
+    animation: badge-shimmer-sweep 2.5s ease-in-out infinite;
+    will-change: background-position;
+  }
+
+  .energy-meter-fill {
+    transition: height 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: height;
+  }
+
+  .meter-glow-pulse {
+    animation: meter-pulse 1.8s ease-in-out infinite;
+    will-change: opacity, box-shadow;
+  }
+
+  /* Custom range slider – cross-browser */
+  .simulator-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    border-radius: 9999px;
+    background: linear-gradient(
+      to right,
+      oklch(from var(--primary) l c h) var(--slider-progress, 0%),
+      oklch(from var(--border) l c h / 0.35) var(--slider-progress, 0%)
+    );
+    outline: none;
+    cursor: pointer;
+  }
+
+  .simulator-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: oklch(from var(--primary) l c h);
+    box-shadow:
+      0 0 0 3px oklch(from var(--background) l c h),
+      0 0 12px oklch(from var(--primary) l c h / 0.5);
+    cursor: pointer;
+    transition: box-shadow 0.2s ease, transform 0.15s ease;
+    will-change: transform;
+  }
+
+  .simulator-slider::-moz-range-thumb {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: oklch(from var(--primary) l c h);
+    box-shadow:
+      0 0 0 3px oklch(from var(--background) l c h),
+      0 0 12px oklch(from var(--primary) l c h / 0.5);
+    border: none;
+    cursor: pointer;
+    transition: box-shadow 0.2s ease, transform 0.15s ease;
+  }
+
+  .simulator-slider:hover::-webkit-slider-thumb,
+  .simulator-slider:focus::-webkit-slider-thumb {
+    box-shadow:
+      0 0 0 3px oklch(from var(--background) l c h),
+      0 0 20px oklch(from var(--primary) l c h / 0.7);
+    transform: scale(1.15);
+  }
+
+  .simulator-slider:hover::-moz-range-thumb,
+  .simulator-slider:focus::-moz-range-thumb {
+    box-shadow:
+      0 0 0 3px oklch(from var(--background) l c h),
+      0 0 20px oklch(from var(--primary) l c h / 0.7);
+    transform: scale(1.15);
+  }
+
+  .impact-ring-track {
+    stroke: oklch(from var(--border) l c h / 0.15);
+    fill: none;
+    stroke-linecap: round;
+  }
+
+  .impact-ring-fill {
+    fill: none;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 0.9s cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: stroke-dashoffset;
+  }
+
+  .count-up-number {
+    font-variant-numeric: tabular-nums;
+    will-change: contents;
+  }
+
+  /* Themed scrollbar – matches site primary green */
+  .themed-scrollbar {
+    /* Firefox */
+    scrollbar-width: thin;
+    scrollbar-color: oklch(from var(--primary) l c h / 0.5) oklch(from var(--border) l c h / 0.12);
+  }
+
+  .themed-scrollbar::-webkit-scrollbar {
+    height: 4px; /* horizontal */
+    width: 4px;  /* vertical */
+  }
+
+  .themed-scrollbar::-webkit-scrollbar-track {
+    background: oklch(from var(--border) l c h / 0.12);
+    border-radius: 9999px;
+  }
+
+  .themed-scrollbar::-webkit-scrollbar-thumb {
+    background: oklch(from var(--primary) l c h / 0.5);
+    border-radius: 9999px;
+  }
+
+  .themed-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: oklch(from var(--primary) l c h / 0.85);
+    box-shadow: 0 0 6px oklch(from var(--primary) l c h / 0.4);
   }
 }
