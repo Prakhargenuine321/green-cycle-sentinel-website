@@ -7,6 +7,8 @@ import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { sendOtpEmail } from "@/lib/email";
 import { promisify } from "util";
+import fs from "fs";
+import path from "path";
 
 const pbkdf2Async = promisify(crypto.pbkdf2);
 
@@ -69,6 +71,20 @@ function decryptPendingData(token: string): PendingRegistrationData | null {
   }
 }
 
+// Helper to log OTP generated in development to terminal console and local otp-debug.log file
+function logOtpInDevelopment(email: string, otpCode: string, action: string) {
+  if (process.env.NODE_ENV !== "production") {
+    const logMessage = `[${new Date().toISOString()}] [${action}] Email: ${email} | OTP: ${otpCode}\n`;
+    console.log(`\n🔑 [DEV ONLY] Generated OTP for ${email}: ${otpCode}\n`);
+    try {
+      const logPath = path.join(process.cwd(), "otp-debug.log");
+      fs.appendFileSync(logPath, logMessage);
+    } catch (e) {
+      console.error("Failed to write to otp-debug.log:", e);
+    }
+  }
+}
+
 // 2. User Registration Ingestion
 export async function registerAction(data: { name: string; email: string; password: string }) {
   try {
@@ -88,10 +104,17 @@ export async function registerAction(data: { name: string; email: string; passwo
     const otpCode = crypto.randomInt(100000, 999999).toString();
     const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
+    // Log the OTP code in development mode for easy developer/tester access
+    logOtpInDevelopment(data.email, otpCode, "REGISTER");
+
     // Send OTP via email
     const emailResult = await sendOtpEmail(data.email, otpCode, data.name);
     if (!emailResult.success) {
-      return { success: false, error: "Failed to send verification email. Please try again." };
+      if (process.env.NODE_ENV !== "production") {
+        console.warn(`[DEV ONLY] Failed to send OTP email to ${data.email}, but continuing registration flow in development:`, emailResult.error);
+      } else {
+        return { success: false, error: "Failed to send verification email. Please try again." };
+      }
     }
 
     // Save registration details in an encrypted cookie
@@ -231,10 +254,17 @@ export async function resendOtpAction(email: string) {
     pendingData.otpExpiresAt = otpExpiresAt.getTime();
     pendingData.attempts = 0; // Reset attempts on resend
 
+    // Log the OTP code in development mode for easy developer/tester access
+    logOtpInDevelopment(email, otpCode, "RESEND");
+
     // Send fresh OTP via email
     const emailResult = await sendOtpEmail(email, otpCode, pendingData.name);
     if (!emailResult.success) {
-      return { success: false, error: "Failed to resend OTP email. Please try again." };
+      if (process.env.NODE_ENV !== "production") {
+        console.warn(`[DEV ONLY] Failed to resend OTP email to ${email}, but continuing flow in development:`, emailResult.error);
+      } else {
+        return { success: false, error: "Failed to resend OTP email. Please try again." };
+      }
     }
 
     // Save updated cookie
